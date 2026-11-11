@@ -68,6 +68,8 @@ See [`.env-template`](.env-template) for the full list of variables.
 07-createEC2WithController.sh      (optional: standalone EC2 Client Controller)
 ```
 
+Demo: migrating from ingress-nginx (NLB) to Envoy Gateway (ALB), with the scripts for the before state: [README-NGINX-TO-ENVOY.md](README-NGINX-TO-ENVOY.md).
+
 ### Operational Scripts (Day-2)
 
 The following scripts are **operational** — run them any time after the initial sequence, not as part of it:
