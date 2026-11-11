@@ -16,6 +16,7 @@
 #     09-migrationCleanupIngress.sh) or as part of a full teardown.
 #   - The ACM certificate. It is reusable and 04-installEnvoy.sh uses the same
 #     one. Opt in with --delete-cert (ACM refuses while a load balancer uses it).
+#     Also removes its Route53 validation record.
 #
 # Usage:
 #   ./04-deleteNginx.sh                 # ingress-nginx + NLB
@@ -25,6 +26,7 @@
 set -euo pipefail
 
 source ./.env
+source ./lib-acm.sh
 
 log()     { printf '\033[1;34m[INFO]\033[0m  %s\n' "$*"; }
 success() { printf '\033[1;32m[OK]\033[0m    %s\n' "$*"; }
@@ -126,10 +128,9 @@ if [[ "$DELETE_CERT" == true ]]; then
   if [[ -n "${CERT_ARN}" && "${CERT_ARN}" != "None" ]]; then
     # ACM refuses to delete a certificate still attached to a load balancer, so
     # this only succeeds once the NLB above (and the Envoy ALB) are really gone.
+    # Also removes the Route53 validation record the install script added.
     log "Deleting ${CERT_ARN}..."
-    aws acm delete-certificate --region "${AWS_REGION}" --certificate-arn "${CERT_ARN}" \
-      && success "Certificate deleted." \
-      || warn "Could not delete ${CERT_ARN} - it is probably still in use by a load balancer."
+    delete_acm_certificate "${CERT_ARN}" "${ROUTE53_ZONE_DOMAIN:-$(cut -d. -f2- <<< "${CJOC_HOST_NAME}")}"
   else
     log "No certificate found for '${CJOC_HOST_NAME}'."
   fi

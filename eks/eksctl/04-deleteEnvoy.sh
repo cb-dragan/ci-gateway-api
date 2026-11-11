@@ -17,7 +17,7 @@
 #     removing them would cascade-delete every Gateway and HTTPRoute in the
 #     cluster, not just ours. Opt in with --delete-crds.
 #   - The ACM certificate. It is reusable across rebuilds and validation takes
-#     minutes. Opt in with --delete-cert.
+#     minutes. Opt in with --delete-cert (also removes its Route53 validation record).
 #
 # Usage:
 #   ./04-deleteEnvoy.sh                 # Envoy Gateway + Gateway resources + ALB
@@ -28,6 +28,7 @@
 set -euo pipefail
 
 source ./.env
+source ./lib-acm.sh
 
 log()     { printf '\033[1;34m[INFO]\033[0m  %s\n' "$*"; }
 success() { printf '\033[1;32m[OK]\033[0m    %s\n' "$*"; }
@@ -156,11 +157,10 @@ if [[ "$DELETE_CERT" == true ]]; then
 
   if [[ -n "${CERT_ARN}" && "${CERT_ARN}" != "None" ]]; then
     # ACM refuses to delete a certificate still attached to a load balancer, so
-    # this only succeeds once the ALB above is really gone.
+    # this only succeeds once the ALB above (and the nginx NLB) are really gone.
+    # Also removes the Route53 validation record the install script added.
     log "Deleting ${CERT_ARN}..."
-    aws acm delete-certificate --region "${AWS_REGION}" --certificate-arn "${CERT_ARN}" \
-      && success "Certificate deleted." \
-      || warn "Could not delete ${CERT_ARN} — it is probably still in use by a load balancer."
+    delete_acm_certificate "${CERT_ARN}" "${ROUTE53_ZONE_DOMAIN:-$(cut -d. -f2- <<< "${CJOC_HOST_NAME}")}"
   else
     log "No certificate found for '${CJOC_HOST_NAME}'."
   fi
