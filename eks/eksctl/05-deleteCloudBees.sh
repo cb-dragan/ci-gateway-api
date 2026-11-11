@@ -87,12 +87,13 @@ fi
 RELEASE_PRESENT=false
 helm status "$RELEASE_NAME" -n "$NS" &>/dev/null && RELEASE_PRESENT=true
 
-# Managed controllers = StatefulSets in the namespace that Helm does not own.
-# Identifying them by the absence of the Helm release annotation avoids relying
-# on CloudBees-specific labels, which vary across chart versions.
-MANAGED_CONTROLLERS=$(kubectl get statefulset -n "$NS" -o json 2>/dev/null \
+# Managed controllers = StatefulSets and Deployments (HA controllers run as
+# Deployments) in the namespace that Helm does not own. Identifying them by the
+# absence of the Helm release annotation avoids relying on CloudBees-specific
+# labels, which vary across chart versions. Listed as "kind/name".
+MANAGED_CONTROLLERS=$(kubectl get statefulset,deployment -n "$NS" -o json 2>/dev/null \
   | jq -r --arg rel "$RELEASE_NAME" \
-      '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"] != $rel) | .metadata.name' \
+      '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"] != $rel) | (.kind | ascii_downcase) + "/" + .metadata.name' \
   || true)
 
 # Agents namespace, if Agents.SeparateNamespace.Create=true made one. Discovered
@@ -125,8 +126,10 @@ fi
 echo "Will delete:"
 echo "    - Helm release ${RELEASE_NAME} (CJOC, HTTPRoute, RBAC, ConfigMaps; MCP Router and its routes if MCP_ENABLED was set)"
 if [[ "$KEEP_CONTROLLERS" != true && -n "$MANAGED_CONTROLLERS" ]]; then
-  echo "    - Managed controller StatefulSets listed above (volumes kept)"
+  echo "    - Managed controller StatefulSets and Deployments listed above (volumes kept)"
+  echo "    - Their leftover Ingresses (label com.cloudbees.cje.type=master)"
 fi
+echo "    - Secret cjoc-secrets and ConfigMap cjoc-casc-envvars (made by the install script, outside Helm)"
 $DELETE_DATA      && echo "    - ALL PVCs above — THIS DESTROYS JENKINS_HOME AND EVERY BUILD HISTORY"
 $DELETE_NAMESPACE && echo "    - Namespace ${NS}${AGENT_NS:+ and ${AGENT_NS}}"
 echo
@@ -156,13 +159,13 @@ fi
 # 2. MANAGED CONTROLLERS — stop them before removing the thing that manages them
 # =============================================================================
 if [[ "$KEEP_CONTROLLERS" != true && -n "$MANAGED_CONTROLLERS" ]]; then
-  log "Deleting managed controller StatefulSets (PVCs are retained)..."
+  log "Deleting managed controller StatefulSets and Deployments (PVCs are retained)..."
   while read -r c; do
     [[ -z "$c" ]] && continue
     log "  ${c}"
     # --cascade=foreground so pods are gone before we move on; otherwise the
     # namespace delete below can race with terminating agent pods.
-    kubectl delete statefulset "$c" -n "$NS" --cascade=foreground --timeout=300s \
+    kubectl delete "$c" -n "$NS" --cascade=foreground --timeout=300s \
       --ignore-not-found || warn "  could not fully delete ${c}"
   done <<< "$MANAGED_CONTROLLERS"
   success "Managed controllers stopped."
@@ -188,6 +191,18 @@ for route in $(kubectl get httproute -n "$NS" -o name 2>/dev/null || true); do
   warn "Removing leftover ${route}"
   kubectl delete "$route" -n "$NS" --ignore-not-found || true
 done
+
+# With ingress-nginx, CJOC creates an Ingress per managed controller (not Helm).
+if [[ "$KEEP_CONTROLLERS" != true ]]; then
+  for ing in $(kubectl get ingress -n "$NS" -l com.cloudbees.cje.type=master -o name 2>/dev/null || true); do
+    warn "Removing leftover ${ing}"
+    kubectl delete "$ing" -n "$NS" --ignore-not-found || true
+  done
+fi
+
+# Made by 05-installCloudBees*.sh with kubectl, so helm uninstall leaves them.
+# The Secret holds the CasC SCM token and the CJOC admin password.
+kubectl delete secret/cjoc-secrets configmap/cjoc-casc-envvars -n "$NS" --ignore-not-found || true
 
 # =============================================================================
 # 4. PVCs (opt-in)
