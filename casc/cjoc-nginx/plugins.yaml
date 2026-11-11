@@ -1,0 +1,23 @@
+# Plugin Categories:
+#   cap - is this a CAP plugin?
+#   3rd - is this a 3rd party plugin?
+#   old - is this a deprecated plugin?
+#   bst - installed by default
+#   dep - installed as dependency
+#   src - used as a source plugin for this list
+plugins:
+  - id: cloudbees-casc-client # cap src
+  - id: cloudbees-casc-items-commons # cap src
+  - id: cloudbees-casc-items-server # cap src
+  - id: cloudbees-jenkins-advisor # cap src
+  - id: cloudbees-ssh-slaves # cap src
+  - id: github # cap src
+  - id: handy-uri-templates-2-api # cap src
+  - id: jackson3-api # cap src
+  - id: jquery3-api # cap src
+  - id: oauth-credentials # cap src
+  - id: operations-center-jnlp-controller # cap src
+  - id: operations-center-rbac # cap src
+  - id: operations-center-webhooks # cap src
+  - id: trilead-api # cap src
+  - id: unique-id # cap src

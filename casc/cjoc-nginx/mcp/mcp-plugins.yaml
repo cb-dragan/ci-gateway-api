@@ -1,0 +1,6 @@
+---
+# MCP Router + OAuth on the operations center (see docs/MCP.md)
+plugins:
+  - id: mcp-server # src; the router lists controllers through the OC's /cjoc/mcp-server/stateless
+  - id: cloudbees-oauth-server # src; authorization server, token exchange (operations center only)
+  - id: cloudbees-oauth-resource # src; resource server

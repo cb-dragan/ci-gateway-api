@@ -1,0 +1,152 @@
+jenkins:
+  systemMessage: "Configured by CasC Bundle ${cascVersion}"
+  # https://$(HOSTNAME}/cjoc/manage/configureSecurity/, Security -> Authorization
+  # enable rbac https://docs.cloudbees.com/docs/cloudbees-ci/latest/casc-commons/rbac
+  authorizationStrategy: "cloudBeesRoleBasedAccessControl"
+  # authorizationStrategy:
+  #   loggedInUsersCanDoAnything:
+  #     allowAnonymousRead: false
+
+  #https://$(HOSTNAME}/cjoc/manage/computer/(built-in)/configure, Nodes->Configure
+  numExecutors: 2
+  primaryView:
+    masters:
+      columns:
+      - "status"
+      - "weather"
+      - "jobName"
+      - "manageMaster"
+      - "masterPodStatusViewColumn"
+      - "totalJobsViewColumn"
+      - "queueSizeViewColumn"
+      - "jenkinsVersionViewColumn"
+      - "cascViewColumn"
+      - "listSelectionColumn"
+      - "masterConfigurationStaleViewColumn"
+      jobFilters:
+      - "connectedMasterViewFilter"
+      name: "Controllers"
+      recurse: true
+  #https://$(HOSTNAME}/cjoc/manage/configureSecurity/, Security->Security Realm
+  securityRealm:
+    # https://github.com/jenkinsci/configuration-as-code-plugin/blob/master/demos/embedded-userdatabase/README.md#configure-jenkins-own-user-database
+    local:
+      allowsSignup: false
+      enableCaptcha: false
+      users:
+      - id: "${ADMIN_ID}"
+        name: "${ADMIN_NAME}"
+        # https://github.com/jenkinsci/configuration-as-code-plugin/blob/master/docs/features/secrets.adoc#readfile
+        password: ${readFile:/var/run/secrets/cjoc/cjocLoginPassword}
+        properties:
+        - mailer:
+            emailAddress: "${ADMIN_EMAIL}"
+  views:
+  - masters:
+      columns:
+      - "status"
+      - "weather"
+      - "jobName"
+      - "manageMaster"
+      - "masterPodStatusViewColumn"
+      - "totalJobsViewColumn"
+      - "queueSizeViewColumn"
+      - "jenkinsVersionViewColumn"
+      - "cascViewColumn"
+      - "listSelectionColumn"
+      - "masterConfigurationStaleViewColumn"
+      jobFilters:
+      - "connectedMasterViewFilter"
+      name: "Controllers"
+      recurse: true
+  - all:
+      name: "all"
+  viewsTabBar: "standard"
+cloudBeesCasCServer:
+  disableRemoteValidation: false
+  visibility: true
+#https://$(HOSTNAME}/cjoc/manage/masterProvisioning/, Configure Controller Provisioning -> Container images            
+masterprovisioning:
+  # dockerImageDefinitionConfiguration:
+  #   images:
+  #   - imageTag: "${controllerImageTagCurrentVersion}"
+  #     name: "${controllerImageNameCurrent}"
+  #   - imageTag: "${controllerImageTagPreviousVersion}"
+  #     name: "${controllerImageNamePrevious}"
+  kubernetes:
+    clusterEndpoints:
+    - id: "default"
+      jenkinsUrl: "http://cjoc.${NAMESPACE}.svc.cluster.local/cjoc/"
+      name: "kubernetes"
+      # "Before" state of the ingress-nginx -> Envoy Gateway migration demo.
+      # The only difference to casc/cjoc/jenkins.yaml (which uses serviceExposure.gateway).
+      serviceExposure:
+        ingress:
+          ingressClass: "nginx"
+      storageClassName: "${CONTROLLER_STORAGE_CLASS}"
+      webSocket: true
+    cpus: "1.0"
+    disk: 50
+    fsGroup: "1000"
+    globalJavaOptions: "-Dorg.csanchez.jenkins.plugins.kubernetes.pipeline.PodTemplateStepExecution.defaultImage=cloudbees/cloudbees-core-agent:${AGENT_VERSION}\
+      \ -Dcom.cloudbees.jenkins.plugins.kube.ServiceAccountFilter.defaultServiceAccount=jenkins-agents\
+      \ -Dcom.cloudbees.networking.useSubdomain=false -Dcom.cloudbees.networking.protocol=\"\
+      https\" -Dcom.cloudbees.networking.hostname=\"${GATEWAY_DOMAIN}\"\
+      \ -Dcom.cloudbees.networking.port=${GATEWAY_PORT} -Dcom.cloudbees.networking.operationsCenterName=\"\
+      cjoc\""
+    javaOptions: "-XshowSettings:vm -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+ParallelRefProcEnabled\
+      \ -XX:+UseStringDeduplication -XX:+AlwaysActAsServerClassMachine -Dhudson.slaves.NodeProvisioner.initialDelay=0\
+      \ -XX:-OmitStackTraceInFastThrow"
+    memory: 3072
+#https://$(HOSTNAME}/cjoc/manage/configureSecurity/, Security -> Security Setting Enforcement
+security:
+  securitySettingsEnforcement:
+    global:
+      realmAndAuthorization:
+        canCustomMapping: false
+        canOverride: false
+        defaultMappingFactory: "restrictedEquivalentRAMF"
+#https://$(HOSTNAME}/cjoc/manage/configure
+unclassified:
+  # System -> CasC Bundle Update Timing
+  bundleUpdateTiming:
+    automaticReload: true
+    automaticRestart: true
+    rejectWarnings: false
+    reloadAlwaysOnRestart: true
+    skipNewVersions: false
+  # System -> Configuration as Code bundle location
+  bundleStorageService:
+    activated: true
+    bundles:
+      - name: "controllers"
+        retriever:
+          SCM:
+            ghChecksActivated: false
+            scmSource:
+              git:
+                credentialsId: "gh-user-token"
+                id: "3840DCA9-E771-4039-9CCE-290BBE357976"
+                remote: ${CASC_SCM_REPO}
+                traits:
+                  - "gitBranchDiscovery"
+                  - headWildcardFilter:
+                      includes: ${CASC_SCM_BRANCH}
+    checkOutTimeout: 600
+    pollingPeriod: 60
+    purgeOnDeactivation: false
+  # System -> CloudBees Configuration as Code managed controller provisioning
+  cascAutoControllerProvisioning:
+    duration: 60
+    fireAndForget: true
+    initialDelay: 15
+    provisionControllerOnCreation: true
+    timeout: 600
+  # System -> CasC Variable Resolution Configuration
+  cascItemsConfiguration:
+    variableInterpolationEnabledForAdmin: true
+    variableInterpolationEnabledForNonAdmin: true
+  # System -> Jenkins Location
+  location:
+    adminAddress: "${ADMIN_EMAIL}"
+    url: "https://${GATEWAY_DOMAIN}/cjoc/"

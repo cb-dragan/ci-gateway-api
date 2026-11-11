@@ -1,0 +1,50 @@
+removeStrategy:
+  rbac: SYNC
+  items: NONE
+items:
+  - kind: managedController
+    name: controller2
+    configuration:
+      kubernetes:
+        allowExternalAgents: false
+        # enable HS/HS 
+        # replication:
+        #   config:
+        #     maxReplicas: 2
+        #     replicas: 1
+        #     targetCPUUtilizationPercentage: 80
+        terminationGracePeriodSeconds: 30
+        image: ${controllerImageNameCurrent}
+        memory: 3072
+        startupPeriodSeconds: 10
+        storageClassName: ${CONTROLLER_STORAGE_CLASS}
+        fsGroup: '1000'
+        cpus: 1.0
+        clusterEndpointId: default
+        disk: 50
+        readinessFailureThreshold: 3
+        livenessTimeoutSeconds: 10
+        domain: controller2
+        livenessPeriodSeconds: 10
+        startupTimeoutSeconds: 5
+        startupInitialDelaySeconds: 30
+        javaOptions: -XshowSettings:vm -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+AlwaysActAsServerClassMachine -Dhudson.slaves.NodeProvisioner.initialDelay=0 -XX:-OmitStackTraceInFastThrow
+    description: ''
+    displayName: controller2-external-casc-service
+    properties:
+      - customWebhookData: {}
+      - sharedHeaderLabelOptIn:
+          optIn: true
+      - healthReporting:
+          enabled: true
+      - owner:
+          delay: 1
+          owners: ''
+      - envelopeExtension:
+          allowExceptions: false
+      - sharedConfigurationOptOut:
+          optOut: false
+      # base64 encoded "githup-app-connector:controller" -> see gitbub-app-connector in  casc-bundle-service-config k8s secret
+      # this requires ./03-install-external-casc-bundle-service.sh to be run first
+      - configurationAsCode:
+          cascBundleServiceBundle: Z2l0aHVwLWFwcC1jb25uZWN0b3I6Y29udHJvbGxlcg==

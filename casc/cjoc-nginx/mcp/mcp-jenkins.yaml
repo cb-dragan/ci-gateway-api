@@ -1,0 +1,46 @@
+# CloudBees CI MCP Router: OAuth authorization server, resource server and OAuth clients (see docs/MCP.md)
+#
+# Needs this env var on the operations center (cjoc-casc-envvars ConfigMap, eks/eksctl/05-installCloudBees.sh):
+#   GATEWAY_DOMAIN  public host name, e.g. ci.example.com
+#
+# Client secrets are deliberately not set here. Do not commit encrypted secrets exported from a running OC.
+
+#https://${GATEWAY_DOMAIN}/cjoc/manage/configureSecurity/, Security -> CloudBees OAuth Authorization Server / Resource Server
+
+# Allowed audiences: https://<GATEWAY_DOMAIN>/cjoc plus every controller (https://<GATEWAY_DOMAIN>/<controller-url-path>).
+# The router requests all of them in one token exchange, so one missing entry fails the whole call (invalid_target).
+# - oauthAuthorizationServer.allowedAudiences is a scalar (newline-separated string): use ${mcp_audiences},
+#   defined in mcp/mcp-variables.yaml.
+# - The per-client allowedAudiences in mcp-credentials.yaml is a YAML sequence. A variable expands to one string and
+#   cannot fill a list, so write the https://${GATEWAY_DOMAIN}/<name> entries out there.
+# Keep both lists in sync.
+
+security:
+  oauthAuthorizationServer:
+    issuer: "https://${GATEWAY_DOMAIN}/cjoc/oauth-server"
+    # in-cluster JWKS, avoids hairpin NAT through the gateway
+    internalJwksUrl: "http://cjoc/cjoc/oauth-server/jwks"
+    # global allow-list; must also contain everything in the per-client lists below
+    allowedAudiences: "${mcp_audiences}"
+    accessTokenTtlSeconds: 600
+    exchangedTokenTtlSeconds: 300
+    # skips the consent prompt for the two seeded clients; set to false to require approval on first use
+    autoApproveSeededClients: true
+    dcrEnabled: false
+    # TEMPORARY: overwrite a stale trustedIssuer ("https:///cjoc/oauth-server") stored on controllers by an earlier
+    # bundle. Set back to false once the controllers advertise the correct issuer.
+    enforceTrustedIssuer: true
+    clientAssertionClockSkewSeconds: 30
+    clientAssertionMaxLifetimeSeconds: 300
+    jwksCacheTtlSeconds: 300
+    idleEvictionEnabled: true
+    idleEvictionTtlSeconds: 7776000
+    dcrRefreshTokenTtlSeconds: 2592000
+    dcrSecretTtlSeconds: 15552000
+    rootRegisterCompat: false
+  oauthResourceServer:
+    trustedIssuer: "https://${GATEWAY_DOMAIN}/cjoc/oauth-server"
+    filterMode: AUTO
+    protectedPaths: "/mcp-server/*"
+    clockSkewSeconds: 60
+    jwksCacheTtlSeconds: 300

@@ -1,0 +1,49 @@
+removeStrategy:
+  rbac: SYNC
+  items: NONE
+items:
+  - kind: managedController
+    name: controller1
+    configuration:
+      kubernetes:
+        allowExternalAgents: false
+        # enable HS/HS 
+        # replication:
+        #   config:
+        #     maxReplicas: 2
+        #     replicas: 1
+        #     targetCPUUtilizationPercentage: 80
+        terminationGracePeriodSeconds: 30
+        image: ${controllerImageNameCurrent}
+        memory: 3072
+        startupPeriodSeconds: 10
+        storageClassName: ${CONTROLLER_STORAGE_CLASS}
+        fsGroup: '1000'
+        cpus: 1.0
+        clusterEndpointId: default
+        disk: 50
+        readinessFailureThreshold: 3
+        livenessTimeoutSeconds: 10
+        domain: controller1
+        livenessPeriodSeconds: 10
+        startupTimeoutSeconds: 5
+        startupInitialDelaySeconds: 30
+        javaOptions: -XshowSettings:vm -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication -XX:+AlwaysActAsServerClassMachine -Dhudson.slaves.NodeProvisioner.initialDelay=0 -XX:-OmitStackTraceInFastThrow
+    description: ''
+    displayName: controller1-casc-scm-retriever
+    properties:
+      - customWebhookData: {}
+      - sharedHeaderLabelOptIn:
+          optIn: true
+      - healthReporting:
+          enabled: true
+      - owner:
+          delay: 1
+          owners: ''
+      - envelopeExtension:
+          allowExceptions: false
+      - sharedConfigurationOptOut:
+          optOut: false
+      # this requires the ./02-install-casc-bundle-retriever.sh to be run first
+      - configurationAsCode:
+          bundle: ${CASC_SCM_BRANCH}/controller-base
