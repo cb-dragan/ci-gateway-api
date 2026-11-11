@@ -81,6 +81,14 @@ fi
 
 # --- IAM role ----------------------------------------------------------------
 if aws iam get-role --role-name "${S3_ARTIFACTS_ROLE_NAME}" >/dev/null 2>&1; then
+  # delete-role fails while any policy is attached. Other policies can sit here:
+  # 07-createS3BackupBucket.sh attaches the backup policy to the role a
+  # ServiceAccount already uses (a ServiceAccount has only one association).
+  for ARN in $(aws iam list-attached-role-policies --role-name "${S3_ARTIFACTS_ROLE_NAME}" \
+      --query 'AttachedPolicies[].PolicyArn' --output text); do
+    log "Detaching ${ARN##*/} from role ${S3_ARTIFACTS_ROLE_NAME} (re-run its create script to restore that access)..."
+    aws iam detach-role-policy --role-name "${S3_ARTIFACTS_ROLE_NAME}" --policy-arn "${ARN}"
+  done
   log "Deleting IAM role ${S3_ARTIFACTS_ROLE_NAME}..."
   aws iam delete-role --role-name "${S3_ARTIFACTS_ROLE_NAME}"
 fi
