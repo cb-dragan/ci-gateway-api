@@ -110,7 +110,15 @@ Also check that controllers and WebSocket agents are reachable. After `04-delete
 
 ## Teardown
 
-`01-deleteCluster.sh` has no ingress-nginx step. Before it, run `./05-deleteCloudBees.sh` as usual and `./04-deleteNginx.sh --delete-cert` (or without `--delete-cert` if the Envoy ALB still uses the certificate). Otherwise the NLB can be orphaned and keep billing.
+`01-deleteCluster.sh` includes the ingress-nginx step. It removes nginx and its NLB before Envoy, because both use the same ACM certificate. The certificate and its Route53 validation record go with the last of the two.
+
+```bash
+./01-deleteCluster.sh --dry-run        # read the plan first
+./01-deleteCluster.sh                  # type the cluster name to confirm
+./01-deleteCluster.sh --report-only    # read-only scan for leftovers
+```
+
+If you only want to remove the before state, run `./04-deleteNginx.sh` on its own (add `--delete-cert` when the Envoy ALB is not installed).
 
 ## Known limits and open points
 

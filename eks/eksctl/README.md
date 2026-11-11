@@ -97,10 +97,11 @@ The following scripts are **operational** — run them any time after the initia
    ├─ 07-deleteS3PlugableStorage-LogsBucket.sh   (DESTRUCTIVE)   optional
    ├─ 07-deleteS3ArtifactStorage.sh              (DESTRUCTIVE)   optional
    ├─ 07-deleteS3BackupBucket.sh                 (DESTRUCTIVE)   optional
-   ├─ 04-deleteEnvoy.sh --delete-crds --delete-cert   (Ingress → ALB first)
+   ├─ 04-deleteNginx.sh                          (nginx path only; NLB first, before Envoy: shared ACM cert)
+   ├─ 04-deleteEnvoy.sh --delete-crds --delete-cert   (Ingress → ALB first; also removes the cert's Route53 validation record)
    ├─ 06-deleteExternalDNS.sh                    (waits for Route53 record sync)
-   ├─ 02-delete-efs-filesystem.sh                (no prompt)     optional
-   ├─ eksctl delete cluster
+   ├─ 02-delete-efs-filesystem.sh --yes          (DESTRUCTIVE)   optional
+   ├─ eksctl delete cluster                      (then removes the ARN-named kubeconfig entries and the node pool state files)
    └─ orphan report (read-only)
 ```
 
@@ -116,7 +117,7 @@ source .env
 - **Irreversible.** It deletes JENKINS_HOME volumes, the three S3 buckets with all their objects, the ACM certificates and the Gateway API/Envoy CRDs. Nothing is deleted before the plan is confirmed.
 - **Fail-stop and re-runnable.** A failing step aborts the run; the delete scripts are idempotent, so fix the cause and run it again.
 - **Not covered by a delete script:** `03-*` (LB controller, Cluster Autoscaler) and `08-createServiceAccountforRemoteAgents.sh` live inside the cluster and are removed with it.
-- **Orphan report.** Lists remaining CloudFormation stacks, resources tagged for the cluster (ALBs, ENIs, security groups, EBS volumes), the named S3/EFS/IAM/ACM/Route53 resources and EC2 add-on. It only reports; it never deletes.
+- **Orphan report.** Lists remaining CloudFormation stacks, resources tagged for the cluster (ALBs, ENIs, security groups, EBS volumes), the named S3/EFS/IAM/ACM/Route53 resources, the EC2 add-on, EKS OIDC providers that no cluster uses, and unattached EBS CSI volumes (that tag is not cluster specific, so check the owner). It only reports; it never deletes.
 - **Individual scripts** still work standalone; the three S3 delete scripts and `06-deleteExternalDNS.sh` accept `--yes`. Run `04-deleteEnvoy.sh` before `06-deleteExternalDNS.sh`, because external-dns removes the Route53 records only after the Ingress is gone.
 
 ### Applying IAM-only config changes to an existing cluster
