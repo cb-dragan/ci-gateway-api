@@ -59,6 +59,12 @@ if aws iam get-role --role-name "${S3_LOGS_ROLE_NAME}" >/dev/null 2>&1; then
   aws iam delete-role --role-name "${S3_LOGS_ROLE_NAME}"
 fi
 if aws iam get-policy --policy-arn "${POLICY_ARN}" >/dev/null 2>&1; then
+  # delete-policy fails while non-default versions exist; the create script
+  # publishes a new version on every re-run.
+  for VERSION in $(aws iam list-policy-versions --policy-arn "${POLICY_ARN}" \
+      --query 'Versions[?IsDefaultVersion==`false`].VersionId' --output text); do
+    aws iam delete-policy-version --policy-arn "${POLICY_ARN}" --version-id "${VERSION}"
+  done
   log "Deleting IAM policy ${S3_LOGS_POLICY_NAME}..."
   aws iam delete-policy --policy-arn "${POLICY_ARN}"
 fi
