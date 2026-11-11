@@ -10,6 +10,12 @@
 #   5. EFS File System
 #   6. EFS Security Group
 #
+# DESTRUCTIVE: the file system and all data on it are gone. Asks you to type the
+# EFS name first. Fails (instead of reporting success) if the security group
+# cannot be deleted, because a leftover group blocks VPC deletion later.
+#
+# Usage: ./02-delete-efs-filesystem.sh [--yes]     # --yes skips the confirmation
+#
 set -euo pipefail
 
 source ./.env
@@ -25,6 +31,24 @@ EFS_CSI_ROLE_NAME="${EFS_CSI_ROLE_NAME:-AmazonEKS_EFS_CSI_DriverRole-${CLUSTER_N
 log()  { printf '\033[1;34m[INFO]\033[0m  %s\n' "$*"; }
 ok()   { printf '\033[1;32m[OK]\033[0m    %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m  %s\n' "$*"; }
+
+ASSUME_YES=false
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y)  ASSUME_YES=true ;;
+    -h|--help) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 0 ;;
+    *)         echo "unknown flag '$arg' (try --help)" >&2; exit 1 ;;
+  esac
+done
+
+echo "This will permanently delete:"
+echo "  - EFS file system '${EFS_NAME}' and ALL data on it (JENKINS_HOME of anything on StorageClass '${STORAGE_CLASS_NAME}')"
+echo "  - its mount targets and security group '${EFS_SG_NAME}'"
+echo "  - StorageClass '${STORAGE_CLASS_NAME}' and namespace '${TEST_NAMESPACE}'"
+if [[ "$ASSUME_YES" != true ]]; then
+  read -r -p "Type the EFS name to confirm: " CONFIRM
+  [[ "$CONFIRM" == "$EFS_NAME" ]] || { echo "Confirmation did not match; aborting." >&2; exit 1; }
+fi
 
 # 1. Delete test namespace if it exists
 if kubectl get namespace "$TEST_NAMESPACE" >/dev/null 2>&1; then
@@ -96,15 +120,23 @@ if [[ -n "$VPC_ID" && "$VPC_ID" != "None" ]]; then
 
   if [[ -n "$EFS_SG_ID" && "$EFS_SG_ID" != "None" ]]; then
     log "Deleting security group ${EFS_SG_ID}..."
-    # Retry loop in case ENIs are still detaching
-    for i in {1..6}; do
+    # The ENIs of the deleted mount targets can take a few minutes to go away.
+    SG_DELETED=false
+    for _ in $(seq 1 30); do
       if aws ec2 delete-security-group --region "$AWS_REGION" --group-id "$EFS_SG_ID" 2>/dev/null; then
+        SG_DELETED=true
         ok "Security group deleted."
         break
       fi
-      log "Security group in use, waiting 5 seconds..."
-      sleep 5
+      log "Security group still in use, waiting 10 seconds..."
+      sleep 10
     done
+    # Not part of the eksctl stacks: if it stays, deleting the VPC fails later.
+    if [[ "$SG_DELETED" != true ]]; then
+      echo "[ERROR] Could not delete security group ${EFS_SG_ID}. Look for ENIs still using it:" >&2
+      echo "  aws ec2 describe-network-interfaces --region ${AWS_REGION} --filters Name=group-id,Values=${EFS_SG_ID}" >&2
+      exit 1
+    fi
   else
     ok "Security group '${EFS_SG_NAME}' not found."
   fi
