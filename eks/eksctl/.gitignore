@@ -2,3 +2,7 @@
 ingress-backup-*.yaml
 values-before.yaml
 values-after.yaml
+
+# Personal node pool sizes saved by 01-scaleDonwNodePools.sh (and the paused
+# autoscaler record). 01-scaleUpNodePools.sh reads them, so they must not be shared.
+.nodepool-scale-state.json*
