@@ -295,10 +295,15 @@ metadata:
   name: efs-test-pod
   namespace: ${TEST_NAMESPACE}
 spec:
-  # runs on the untainted "agents" node group; the "controllers" pool carries
-  # a NoSchedule taint so it's skipped automatically without needing a toleration
+  # runs on the "agents" node group, which is tainted workload=agent:NoSchedule
+  # (see eksctl-config.yaml.tpl), so the pod needs the matching toleration
   nodeSelector:
     workload: agent
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: agent
+      effect: NoSchedule
   containers:
     - name: app
       image: public.ecr.aws/docker/library/busybox:latest
