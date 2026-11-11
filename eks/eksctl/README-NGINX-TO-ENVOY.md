@@ -17,6 +17,7 @@ Run everything from `eks/eksctl` with `source .env` done (see [README.md](README
 
 ```bash
 ./00-login.sh
+./00-checkEnv.sh                    # read-only: .env, tools, AWS account, Route53 zone
 ./01-createCluster.sh
 ./03-installAwsLbController.sh      # needed for the NLB
 ./04-installNginx.sh                # ingress-nginx + NLB + ACM cert
