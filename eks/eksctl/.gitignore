@@ -1,0 +1,4 @@
+# Local files written by the ingress-nginx -> Envoy migration scripts. Do not commit.
+ingress-backup-*.yaml
+values-before.yaml
+values-after.yaml
