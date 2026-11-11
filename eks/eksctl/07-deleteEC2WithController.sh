@@ -33,6 +33,7 @@
 set -euo pipefail
 
 source ./.env
+source ./lib-acm.sh
 
 log()     { printf '\033[1;34m[INFO]\033[0m  %s\n' "$*"; }
 success() { printf '\033[1;32m[OK]\033[0m    %s\n' "$*"; }
@@ -181,6 +182,22 @@ if [[ "$DELETE_CERT" == true ]]; then
     --output text 2>/dev/null || true)
 
   if [[ -n "$CERT_ARN" && "$CERT_ARN" != "None" ]]; then
+    # 07-createEC2WithController.sh folded this ARN into the cjoc-alb Ingress
+    # annotation (so the AWS Load Balancer Controller keeps it on the listener).
+    # Take it out again, or the controller keeps trying to attach a deleted cert.
+    CURRENT_CERT_ARNS=$(kubectl get ingress cjoc-alb -n "$ENVOY_GW_NAMESPACE" \
+      -o jsonpath='{.metadata.annotations.alb\.ingress\.kubernetes\.io/certificate-arn}' 2>/dev/null || true)
+    if [[ ",${CURRENT_CERT_ARNS}," == *",${CERT_ARN},"* ]]; then
+      REMAINING_CERT_ARNS=$(tr ',' '\n' <<< "$CURRENT_CERT_ARNS" | grep -vxF "$CERT_ARN" | paste -sd, - || true)
+      if [[ -n "$REMAINING_CERT_ARNS" ]]; then
+        kubectl annotate ingress cjoc-alb -n "$ENVOY_GW_NAMESPACE" \
+          "alb.ingress.kubernetes.io/certificate-arn=${REMAINING_CERT_ARNS}" --overwrite >/dev/null
+        success "Certificate removed from the cjoc-alb Ingress annotation."
+      else
+        warn "The EC2 certificate is the only one on the cjoc-alb annotation; leaving the annotation as it is."
+      fi
+    fi
+
     if [[ -n "$LISTENER_ARN" ]]; then
       IS_DEFAULT=$(aws elbv2 describe-listener-certificates --region "$AWS_REGION" --listener-arn "$LISTENER_ARN" \
         --query "Certificates[?CertificateArn=='${CERT_ARN}'].IsDefault | [0]" --output text 2>/dev/null || true)
@@ -190,16 +207,12 @@ if [[ "$DELETE_CERT" == true ]]; then
         log "Detaching certificate from the shared listener (if attached)..."
         aws elbv2 remove-listener-certificates --region "$AWS_REGION" --listener-arn "$LISTENER_ARN" \
           --certificates "CertificateArn=${CERT_ARN}" >/dev/null 2>&1 || true
-        log "Deleting certificate ${CERT_ARN}..."
-        aws acm delete-certificate --region "$AWS_REGION" --certificate-arn "$CERT_ARN" \
-          && success "Certificate deleted." \
-          || warn "Could not delete ${CERT_ARN} — it may still be in use."
+        log "Deleting certificate ${CERT_ARN} (and its Route53 validation record)..."
+        delete_acm_certificate "$CERT_ARN" "$ROUTE53_ZONE_DOMAIN"
       fi
     else
       log "Deleting certificate ${CERT_ARN} (listener not resolved, so no detach step was needed)..."
-      aws acm delete-certificate --region "$AWS_REGION" --certificate-arn "$CERT_ARN" \
-        && success "Certificate deleted." \
-        || warn "Could not delete ${CERT_ARN} — it may still be in use."
+      delete_acm_certificate "$CERT_ARN" "$ROUTE53_ZONE_DOMAIN"
     fi
   else
     log "No certificate found for '${EC2_HOST_NAME}'."
