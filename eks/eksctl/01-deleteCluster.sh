@@ -10,11 +10,14 @@
 #   3. 07-deleteS3PlugableStorage-LogsBucket.sh      DESTRUCTIVE (bucket + data)
 #      07-deleteS3ArtifactStorage.sh                 DESTRUCTIVE (bucket + data)
 #      07-deleteS3BackupBucket.sh                    DESTRUCTIVE (bucket + data)
-#   4. 04-deleteEnvoy.sh --delete-crds --delete-cert Ingress -> ALB, Envoy, ACM cert
-#   5. 06-deleteExternalDNS.sh                       Route53 records, IAM role/policy
-#   6. 02-delete-efs-filesystem.sh                   EFS, mount targets, SG
-#   7. eksctl delete cluster                         cluster, VPC, node groups, eksctl IAM
-#   8. Orphan report (read-only): anything still tagged for / named after the cluster
+#   4. 04-deleteNginx.sh                             ingress-nginx, NLB (before Envoy: both use the ACM cert)
+#   5. 04-deleteEnvoy.sh --delete-crds --delete-cert Ingress -> ALB, Envoy, ACM cert + its Route53 validation record
+#   6. 06-deleteExternalDNS.sh                       Route53 records, IAM role/policy
+#   7. 02-delete-efs-filesystem.sh --yes             EFS, mount targets, SG
+#   8. eksctl delete cluster                         cluster, VPC, node groups, eksctl IAM,
+#                                                    then local cleanup (kubeconfig entry, node pool state files)
+#   9. Orphan report (read-only): anything still tagged for / named after the cluster,
+#      EKS OIDC providers without a cluster, unattached EBS CSI volumes
 #
 # 03-* (LB controller, Cluster Autoscaler) and 08-* (remote-agent ServiceAccount)
 # have no delete script; they live inside the cluster and go with it.
@@ -47,7 +50,7 @@ while [[ $# -gt 0 ]]; do
     --yes|-y)       ASSUME_YES=true ;;
     --dry-run)      DRY_RUN=true ;;
     --report-only)  REPORT_ONLY=true ;;
-    -h|--help)      sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help)      awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 0 ;;
     *)              error "unknown flag '$1' (try --help)" ;;
   esac
   shift
@@ -72,6 +75,7 @@ EXTERNAL_DNS_ROLE_NAME="${EXTERNAL_DNS_ROLE_NAME:-AmazonEKS_ExternalDNS_Role-${C
 EXTERNAL_DNS_POLICY_NAME="${EXTERNAL_DNS_POLICY_NAME:-AmazonEKS_ExternalDNS_Policy-${CLUSTER_NAME}}"
 NAMESPACE_EXTERNAL_DNS="${NAMESPACE_EXTERNAL_DNS:-external-dns}"
 CLOUDBEES_RELEASE_NAME="${CLOUDBEES_RELEASE_NAME:-cloudbees-core-envoy}"
+INGRESS_NGINX_NAMESPACE="${INGRESS_NGINX_NAMESPACE:-ingress-nginx}"
 
 # =============================================================================
 # DETECTION (read-only). Each has_* returns 0 if there is something to delete.
@@ -106,6 +110,15 @@ has_envoy() {
     || kubectl get namespace "$ENVOY_GW_NAMESPACE" &>/dev/null \
     || kubectl get gateway "$GATEWAY_NAME" -n "$NAMESPACE_CLOUDBEES" &>/dev/null
 }
+has_nginx() {
+  [[ "$K8S_OK" == true ]] || return 1
+  helm status ingress-nginx -n "$INGRESS_NGINX_NAMESPACE" &>/dev/null \
+    || kubectl get namespace "$INGRESS_NGINX_NAMESPACE" &>/dev/null
+}
+# The ACM cert is shared by the nginx NLB and the Envoy ALB: the last of the two
+# to be removed deletes it, so the nginx step only does it when there is no Envoy.
+NGINX_CERT_FLAG="--delete-cert"
+has_envoy && NGINX_CERT_FLAG=""
 has_acm_cert() {
   local n
   n=$(aws acm list-certificates --region "$AWS_REGION" \
@@ -126,6 +139,25 @@ has_efs() {
   [[ -n "$id" && "$id" != "None" ]]
 }
 has_cluster() { [[ "$CLUSTER_EXISTS" == true ]]; }
+
+# =============================================================================
+# LOCAL CLEANUP (after the cluster is gone)
+# =============================================================================
+cleanup_local() {
+  local arn="arn:aws:eks:${AWS_REGION}:${AWS_ACCOUNT_ID}:cluster/${CLUSTER_NAME}" contexts
+  # eksctl removes its own kubeconfig entries; `aws eks update-kubeconfig`
+  # (01-createCluster.sh) adds ones named after the cluster ARN.
+  contexts=$(kubectl config get-contexts -o name 2>/dev/null || true)
+  if [[ $'\n'"${contexts}"$'\n' == *$'\n'"${arn}"$'\n'* ]]; then
+    kubectl config delete-context "$arn" >/dev/null 2>&1 || true
+    kubectl config delete-cluster "$arn" >/dev/null 2>&1 || true
+    kubectl config delete-user "$arn" >/dev/null 2>&1 || true
+    success "Removed the kubeconfig entries for ${arn}."
+  fi
+  # Sizes saved for this cluster: 01-scaleUpNodePools.sh would apply them to the next one.
+  local state="${NODEPOOL_STATE_FILE:-.nodepool-scale-state.json}"
+  rm -f "$state" "${state}.bak" "${state}.autoscaler"
+}
 
 # =============================================================================
 # ORPHAN REPORT (read-only; never deletes)
@@ -164,6 +196,31 @@ orphan_report() {
   while read -r arn; do
     [[ -n "$arn" && "$arn" != "None" ]] && report "tagged resource ${arn}"
   done < <(printf '%s\n' "$arns" | sort -u)
+
+  # IAM OIDC providers (IRSA) of EKS clusters in this region that no cluster uses any more.
+  local live_ids="" c oidc_arn oidc_id vol size pvc_ns
+  for c in $(aws eks list-clusters --region "$AWS_REGION" --query 'clusters[]' --output text 2>/dev/null || true); do
+    live_ids+=$(aws eks describe-cluster --name "$c" --region "$AWS_REGION" \
+      --query 'cluster.identity.oidc.issuer' --output text 2>/dev/null | sed 's#.*/id/##' || true)
+    live_ids+=$'\n'
+  done
+  for oidc_arn in $(aws iam list-open-id-connect-providers \
+      --query 'OpenIDConnectProviderList[].Arn' --output text 2>/dev/null || true); do
+    [[ "$oidc_arn" == *"oidc.eks.${AWS_REGION}.amazonaws.com/id/"* ]] || continue
+    oidc_id="${oidc_arn##*/}"
+    [[ $'\n'"${live_ids}" == *$'\n'"${oidc_id}"$'\n'* ]] \
+      || report "IAM OIDC provider ${oidc_arn} (no EKS cluster uses it)"
+  done
+
+  # Unattached EBS volumes made by the EBS CSI driver. The tag is not cluster
+  # specific, so a volume listed here may belong to another cluster.
+  out=$(aws ec2 describe-volumes --region "$AWS_REGION" \
+    --filters "Name=status,Values=available" "Name=tag-key,Values=ebs.csi.aws.com/cluster" \
+    --query 'Volumes[].[VolumeId,Size,Tags[?Key==`kubernetes.io/created-for/pvc/namespace`]|[0].Value]' \
+    --output text 2>/dev/null || true)
+  while IFS=$'\t' read -r vol size pvc_ns; do
+    [[ -n "${vol:-}" ]] && report "unattached EBS CSI volume ${vol} (${size} GiB, PVC namespace ${pvc_ns:-?}); may belong to another cluster"
+  done <<< "$out"
 
   # Named resources created by the add-on scripts.
   for b in "$S3_BACKUP_BUCKET" "$S3_ARTIFACTS_BUCKET" "$S3_LOGS_BUCKET"; do
@@ -234,9 +291,10 @@ add_step "CloudBees CI, PVCs/JENKINS_HOME and namespaces" has_cloudbees     "./0
 add_step "S3 build-logs bucket (DESTRUCTIVE)"             has_s3_logs       "./07-deleteS3PlugableStorage-LogsBucket.sh --yes"
 add_step "S3 artifacts bucket (DESTRUCTIVE)"              has_s3_artifacts  "./07-deleteS3ArtifactStorage.sh --yes"
 add_step "S3 backup bucket (DESTRUCTIVE)"                 has_s3_backup     "./07-deleteS3BackupBucket.sh --yes"
+add_step "ingress-nginx and its NLB"                      has_nginx         "./04-deleteNginx.sh ${NGINX_CERT_FLAG} --yes"
 add_step "Envoy Gateway, ALB, CRDs and ACM cert"          has_envoy         "./04-deleteEnvoy.sh --delete-crds --delete-cert --yes"
 add_step "external-dns, Route53 records, IAM role/policy" has_external_dns  "./06-deleteExternalDNS.sh --yes"
-add_step "EFS file system, mount targets, SG"             has_efs           "./02-delete-efs-filesystem.sh"
+add_step "EFS file system, mount targets, SG"             has_efs           "./02-delete-efs-filesystem.sh --yes"
 add_step "EKS cluster ${CLUSTER_NAME} (eksctl)"           has_cluster       "eksctl"
 
 echo
@@ -278,6 +336,7 @@ for label in "${STEP_LABEL[@]}"; do
       envsubst < eksctl-config.yaml.tpl > eksctl-config.yaml
       log "Deleting EKS cluster ${CLUSTER_NAME} in region ${AWS_REGION}..."
       eksctl delete cluster -f eksctl-config.yaml --wait --force --disable-nodegroup-eviction
+      cleanup_local
     else
       # shellcheck disable=SC2086
       bash ${STEP_CMD[$i]}
