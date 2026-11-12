@@ -9,24 +9,6 @@ jenkins:
 
   #https://$(HOSTNAME}/cjoc/manage/computer/(built-in)/configure, Nodes->Configure
   numExecutors: 2
-  primaryView:
-    masters:
-      columns:
-      - "status"
-      - "weather"
-      - "jobName"
-      - "manageMaster"
-      - "masterPodStatusViewColumn"
-#      - "totalJobsViewColumn"
-      - "queueSizeViewColumn"
-      - "jenkinsVersionViewColumn"
-      - "cascViewColumn"
-      - "listSelectionColumn"
-      - "masterConfigurationStaleViewColumn"
-      jobFilters:
-      - "connectedMasterViewFilter"
-      name: "Controllers"
-      recurse: true
   #https://$(HOSTNAME}/cjoc/manage/configureSecurity/, Security->Security Realm
   securityRealm:
     # https://github.com/jenkinsci/configuration-as-code-plugin/blob/master/demos/embedded-userdatabase/README.md#configure-jenkins-own-user-database
@@ -41,27 +23,6 @@ jenkins:
         properties:
         - mailer:
             emailAddress: "${ADMIN_EMAIL}"
-  views:
-  - masters:
-      columns:
-      - "status"
-      - "weather"
-      - "jobName"
-      - "manageMaster"
-      - "masterPodStatusViewColumn"
-#      - "totalJobsViewColumn"
-      - "queueSizeViewColumn"
-      - "jenkinsVersionViewColumn"
-      - "cascViewColumn"
-      - "listSelectionColumn"
-      - "masterConfigurationStaleViewColumn"
-      jobFilters:
-      - "connectedMasterViewFilter"
-      name: "Controllers"
-      recurse: true
-  - all:
-      name: "all"
-  viewsTabBar: "standard"
 cloudBeesCasCServer:
   disableRemoteValidation: false
   visibility: true
